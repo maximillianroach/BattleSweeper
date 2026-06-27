@@ -1,6 +1,7 @@
 export type Room = {
   id: string;
   players: string[];
+  hostID: string | null;
 };
 
 const rooms = new Map<string, Room>();
@@ -35,7 +36,7 @@ export const getRoom = (roomID: string): Room | undefined => {
 };
 
 export const createRoom = (): Room => {
-  const newRoom: Room = { id: generateRoomID(), players: [] };
+  const newRoom: Room = { id: generateRoomID(), players: [], hostID: null };
   rooms.set(newRoom.id, newRoom);
   return newRoom;
 };
