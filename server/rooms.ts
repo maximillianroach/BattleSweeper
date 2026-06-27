@@ -1,6 +1,14 @@
+import { type Board } from "./board.ts";
+
+export type Player = {
+  id: string;
+  board: Board | null;
+  progress: number;
+};
+
 export type Room = {
   id: string;
-  players: string[];
+  players: Player[];
   hostID: string | null;
 };
 
@@ -43,7 +51,7 @@ export const createRoom = (): Room => {
 
 export const findRoomByPlayer = (socketID: string): Room | undefined => {
   for (const room of rooms.values()) {
-    if (room.players.includes(socketID)) {
+    if (room.players.some((p) => p.id === socketID)) {
       return room;
     }
   }

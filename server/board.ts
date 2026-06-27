@@ -66,6 +66,7 @@ export function createBoard(
   return board;
 }
 
+// Reveals the state of the cell at specified position
 export function reveal(board: Board, row: number, col: number): Board {
   if (board[row][col].revealed || board[row][col].flagged) {
     return board;
@@ -102,4 +103,26 @@ export function reveal(board: Board, row: number, col: number): Board {
   }
 
   return board;
+}
+
+export function progress(board: Board): number {
+  const num_rows = board.length;
+  const num_cols = board[0].length;
+
+  let revealed_count = 0;
+  let safe_count = 0;
+
+  for (let i = 0; i < num_rows; i++) {
+    for (let j = 0; j < num_cols; j++) {
+      if (!board[i][j].isMine) {
+        if (board[i][j].revealed) {
+          revealed_count++;
+        }
+
+        safe_count++;
+      }
+    }
+  }
+
+  return Math.round((revealed_count / safe_count) * 100);
 }

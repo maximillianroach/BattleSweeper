@@ -10,10 +10,33 @@ type SafeCell = {
   isMine: boolean | null;
 };
 
+// Created as a safe version of Player - no board
+// We don't want to mix the server-side Player with client-side
+type PlayerInfo = {
+  id: string;
+  progress: number;
+};
+
+function ProgressBars({ players }: { players: PlayerInfo[] }) {
+  return (
+    <div>
+      <ul>
+        {players.map((p) => {
+          return (
+            <li key={p.id}>
+              ({p.id}) Progress: {p.progress}%
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function Board() {
   const socketRef = useRef<Socket | null>(null);
   const [board, setBoard] = useState<SafeCell[][] | null>(null);
-  const [players, setPlayers] = useState<string[]>([]);
+  const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [hostID, setHostID] = useState<string | null>(null);
   const params = useParams();
   const roomID = params.roomID as string;
@@ -34,9 +57,13 @@ export default function Board() {
       },
     );
 
+    socket.on("progress-update", (payload: { players: PlayerInfo[] }) => {
+      setPlayers(payload.players);
+    });
+
     socket.on(
       "room-update",
-      (payload: { players: string[]; hostID: string }) => {
+      (payload: { players: PlayerInfo[]; hostID: string }) => {
         setPlayers(payload.players);
         setHostID(payload.hostID);
       },
@@ -85,13 +112,15 @@ export default function Board() {
       <div>
         <h3>Players ({players.length})</h3>
         <ul>
-          {players.map((playerID) => (
-            <li key={playerID}>{playerID}</li>
+          {players.map((player) => (
+            <li key={player.id}>{player.id}</li>
           ))}
         </ul>
       </div>
 
       {isHost ? <button onClick={hostStartGameClick}>Start Game</button> : null}
+
+      <ProgressBars players={players} />
 
       {board ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(9,30px)" }}>
