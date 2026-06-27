@@ -1,15 +1,21 @@
 import { type Board } from "./board.ts";
 
+type PlayerStatus = "playing" | "eliminated" | "won";
+
+type RoomStatus = "waiting" | "playing" | "finished";
+
 export type Player = {
   id: string;
   board: Board | null;
   progress: number;
+  status: PlayerStatus;
 };
 
 export type Room = {
   id: string;
   players: Player[];
   hostID: string | null;
+  status: RoomStatus;
 };
 
 const rooms = new Map<string, Room>();
@@ -44,7 +50,12 @@ export const getRoom = (roomID: string): Room | undefined => {
 };
 
 export const createRoom = (): Room => {
-  const newRoom: Room = { id: generateRoomID(), players: [], hostID: null };
+  const newRoom: Room = {
+    id: generateRoomID(),
+    players: [],
+    hostID: null,
+    status: "waiting",
+  };
   rooms.set(newRoom.id, newRoom);
   return newRoom;
 };

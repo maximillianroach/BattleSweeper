@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 import { createBoard, reveal, type Board, progress } from "./board.ts";
-import { type Player } from "./rooms.ts";
+import { type Player, type Room } from "./rooms.ts";
 import {
   generateRoomID,
   getRoom,
@@ -41,8 +41,30 @@ function toSafeBoard(board: Board): SafeCell[][] {
 function toSafePlayers(players: Player[]) {
   return players.map((p) => ({
     id: p.id,
-    progress: p.board ? progress(p.board) : 0,
+    progress: p.board ? p.progress : 0,
+    status: p.status,
   }));
+}
+
+// Used in start-game listener for when game is restarted
+function resetGame(room: Room) {
+  // Change player statuses to "playing" and progress to 0
+  const players = room.players;
+
+  for (const player of players) {
+    player.status = "playing";
+    player.progress = 0;
+    player.board = null;
+  }
+}
+// Checks if all players in the room are eliminated
+function checkAllEliminated(room: Room) {
+  for (const player of room.players) {
+    if (player.status !== "eliminated") {
+      return false;
+    }
+  }
+  return true;
 }
 
 const io = new Server(4000, {
@@ -64,12 +86,31 @@ io.on("connection", (socket) => {
     const board = player?.board;
 
     if (board && room) {
-      reveal(board, payload.row, payload.col);
-      player.progress = progress(board);
-      io.to(room.id).emit("progress-update", {
-        players: toSafePlayers(room.players),
-      });
-      socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
+      // Cheks that both the player and room have "playing" status for revealing to be allowed.
+      if (player.status === "playing" && room.status === "playing") {
+        reveal(board, payload.row, payload.col);
+        player.progress = progress(board);
+
+        // If the player reveals a mine, they are eliminated
+        if (board[payload.row][payload.col].isMine) {
+          player.status = "eliminated";
+        }
+
+        // If the player's progress reaches 100, they have won
+        // Change room status to "finished"
+        if (player.progress === 100) {
+          player.status = "won";
+          room.status = "finished";
+        } else if (checkAllEliminated(room)) {
+          room.status = "finished";
+        }
+
+        io.to(room.id).emit("progress-update", {
+          players: toSafePlayers(room.players),
+          roomStatus: room.status,
+        });
+        socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
+      }
     }
   });
 
@@ -89,7 +130,12 @@ io.on("connection", (socket) => {
       room.hostID = socket.id;
     }
 
-    room.players.push({ id: socket.id, board: null, progress: 0 });
+    room.players.push({
+      id: socket.id,
+      board: null,
+      progress: 0,
+      status: "playing",
+    });
     socket.join(payload.roomID);
     io.to(payload.roomID).emit("room-update", {
       players: toSafePlayers(room.players),
@@ -100,6 +146,8 @@ io.on("connection", (socket) => {
   socket.on("start-game", (payload: { roomID: string }) => {
     const room = getRoom(payload.roomID);
     if (!room) return;
+
+    resetGame(room);
 
     // Create the shared board
     const sharedBoard = createBoard(9, 9, 10);
@@ -120,7 +168,16 @@ io.on("connection", (socket) => {
       });
     }
 
-    io.to(payload.roomID).emit("game-starting");
+    // Enable "playing" status for the room
+    room.status = "playing";
+
+    io.to(payload.roomID).emit("game-starting", { roomStatus: room.status });
+
+    // We need a progress-update so we can send the new player statuses after resetting
+    io.to(payload.roomID).emit("progress-update", {
+      players: toSafePlayers(room.players),
+      roomStatus: room.status,
+    });
   });
 
   // When a player disconnects from a room they are removed from that room's player list

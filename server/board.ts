@@ -11,6 +11,7 @@ export function createBoard(
   row: number,
   col: number,
   mineCount: number,
+  avoid?: Set<number>,
 ): Board {
   const board: Board = Array.from({ length: row }, () =>
     Array.from({ length: col }, () => ({
@@ -21,7 +22,10 @@ export function createBoard(
     })),
   );
 
-  const positions: number[] = Array.from({ length: row * col }, (_, i) => i);
+  let positions: number[] = Array.from({ length: row * col }, (_, i) => i);
+  if (avoid) {
+    positions = positions.filter((num) => !avoid.has(num));
+  }
 
   // Fisher-Yates shuffle
   for (let i = positions.length - 1; i > 0; i--) {
@@ -74,13 +78,8 @@ export function reveal(board: Board, row: number, col: number): Board {
 
   board[row][col].revealed = true;
 
-  if (board[row][col].adjacentMines > 0) {
-    board[row][col].revealed = true;
-    return board;
-  }
-
   // Stops from cascading out of mine
-  if (board[row][col].adjacentMines === 0 && board[row][col].isMine) {
+  if (board[row][col].isMine) {
     return board;
   }
 

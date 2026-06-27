@@ -3,6 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { useParams } from "next/navigation";
 
+type PlayerStatus = "playing" | "eliminated" | "won";
+
+type RoomStatus = "waiting" | "playing" | "finished";
+
 type SafeCell = {
   revealed: boolean;
   flagged: boolean;
@@ -15,8 +19,10 @@ type SafeCell = {
 type PlayerInfo = {
   id: string;
   progress: number;
+  status: PlayerStatus;
 };
 
+// Displays the progress of each player
 function ProgressBars({ players }: { players: PlayerInfo[] }) {
   return (
     <div>
@@ -24,7 +30,7 @@ function ProgressBars({ players }: { players: PlayerInfo[] }) {
         {players.map((p) => {
           return (
             <li key={p.id}>
-              ({p.id}) Progress: {p.progress}%
+              ({p.id}) Progress: {p.progress}% - {p.status}
             </li>
           );
         })}
@@ -33,11 +39,67 @@ function ProgressBars({ players }: { players: PlayerInfo[] }) {
   );
 }
 
-export default function Board() {
+function Board({
+  board,
+  onCellClick,
+  canPlay,
+}: {
+  board: SafeCell[][];
+  onCellClick: (r: number, c: number) => void;
+  canPlay: boolean;
+}) {
+  // Determines the symbol of a cell based on its properties
+  const determineSymbol = (cell: SafeCell): string => {
+    if (!cell.revealed) {
+      return cell.flagged ? "🚩" : "";
+    }
+    if (cell.isMine) {
+      return "💣";
+    }
+    if (cell.adjacentMines === 0) {
+      return "";
+    }
+    return String(cell.adjacentMines);
+  };
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(9,30px)",
+        opacity: canPlay ? 1 : 0.5, // visually dim when can't play
+      }}
+    >
+      {board.map((row, r) =>
+        row.map((cell, c) => (
+          <button
+            key={`${r}-${c}`}
+            onClick={() => canPlay && onCellClick(r, c)}
+            disabled={!canPlay}
+            style={{
+              width: 30,
+              height: 30,
+              border: "1px solid #999",
+              background: cell.revealed ? "#ddd" : "#bbb",
+              fontSize: 14,
+              cursor: canPlay ? "pointer" : "default",
+              color: "black",
+            }}
+          >
+            {determineSymbol(cell)}
+          </button>
+        )),
+      )}
+    </div>
+  );
+}
+
+export default function GameRoom() {
   const socketRef = useRef<Socket | null>(null);
   const [board, setBoard] = useState<SafeCell[][] | null>(null);
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [hostID, setHostID] = useState<string | null>(null);
+  const [roomStatus, setRoomStatus] = useState<string>("waiting");
   const params = useParams();
   const roomID = params.roomID as string;
 
@@ -57,9 +119,13 @@ export default function Board() {
       },
     );
 
-    socket.on("progress-update", (payload: { players: PlayerInfo[] }) => {
-      setPlayers(payload.players);
-    });
+    socket.on(
+      "progress-update",
+      (payload: { players: PlayerInfo[]; roomStatus: RoomStatus }) => {
+        setPlayers(payload.players);
+        setRoomStatus(payload.roomStatus);
+      },
+    );
 
     socket.on(
       "room-update",
@@ -69,8 +135,8 @@ export default function Board() {
       },
     );
 
-    socket.on("game-starting", () => {
-      console.log("The game is starting!");
+    socket.on("game-starting", (payload: { roomStatus: RoomStatus }) => {
+      setRoomStatus(payload.roomStatus);
     });
 
     return () => {
@@ -81,26 +147,14 @@ export default function Board() {
   // Checks if the current socket is the host
   const isHost = hostID !== null && hostID === socketRef.current?.id;
 
+  // Derive the player's status
+  const me = players.find((p) => p.id === socketRef.current?.id);
+  const myStatus = me?.status;
+  const canPlay = myStatus === "playing" && roomStatus === "playing";
+
   // When a cell is clicked that signal is sent to the server to perform the proper reveal
   const cellClick = (row: number, col: number) => {
     socketRef.current?.emit("reveal", { row: row, col: col });
-  };
-
-  // Determines the symbol of a cell based on its properties
-  const determineSymbol = (cell: SafeCell): string => {
-    if (!cell.revealed) {
-      return cell.flagged ? "🚩" : "";
-    }
-
-    if (cell.isMine) {
-      return "💣";
-    }
-
-    if (cell.adjacentMines === 0) {
-      return "";
-    }
-
-    return String(cell.adjacentMines);
   };
 
   const hostStartGameClick = () => {
@@ -110,43 +164,25 @@ export default function Board() {
   return (
     <>
       <div>
-        <h3>Players ({players.length})</h3>
-        <ul>
-          {players.map((player) => (
-            <li key={player.id}>{player.id}</li>
-          ))}
-        </ul>
+        {isHost && roomStatus === "waiting" ? (
+          <button onClick={hostStartGameClick}>Start Game</button>
+        ) : null}
+
+        {isHost && roomStatus === "finished" ? (
+          <button onClick={hostStartGameClick}>Start New Game</button>
+        ) : null}
+
+        <ProgressBars players={players} />
+
+        {myStatus === "won" && <h2>You Won!</h2>}
+        {myStatus === "eliminated" && <h2>You hit a mine - eliminated</h2>}
+
+        {board ? (
+          <Board board={board} onCellClick={cellClick} canPlay={canPlay} />
+        ) : (
+          <p>Waiting for game to start...</p>
+        )}
       </div>
-
-      {isHost ? <button onClick={hostStartGameClick}>Start Game</button> : null}
-
-      <ProgressBars players={players} />
-
-      {board ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(9,30px)" }}>
-          {board.map((row, r) =>
-            row.map((cell, c) => (
-              <button
-                key={`${r}-${c}`}
-                onClick={() => cellClick(r, c)}
-                style={{
-                  width: 30,
-                  height: 30,
-                  border: "1px solid #999",
-                  background: cell.revealed ? "#ddd" : "#bbb",
-                  fontSize: 14,
-                  cursor: "pointer",
-                  color: "black",
-                }}
-              >
-                {determineSymbol(cell)}
-              </button>
-            )),
-          )}
-        </div>
-      ) : (
-        <p>Waiting for game to start...</p>
-      )}
     </>
   );
 }
