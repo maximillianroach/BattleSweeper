@@ -4,12 +4,15 @@ type PlayerStatus = "playing" | "eliminated" | "won";
 
 type RoomStatus = "waiting" | "playing" | "finished";
 
+export type Difficulty = "easy" | "medium" | "hard";
+
 export type Player = {
   id: string;
   board: Board | null;
   progress: number;
   status: PlayerStatus;
   hasStarted: boolean;
+  name: string;
 };
 
 export type Room = {
@@ -18,6 +21,7 @@ export type Room = {
   hostID: string | null;
   status: RoomStatus;
   safeStartCell: { row: number; col: number } | null;
+  difficulty: Difficulty;
 };
 
 const rooms = new Map<string, Room>();
@@ -58,6 +62,7 @@ export const createRoom = (): Room => {
     hostID: null,
     status: "waiting",
     safeStartCell: null,
+    difficulty: "easy",
   };
   rooms.set(newRoom.id, newRoom);
   return newRoom;

@@ -7,6 +7,10 @@ type PlayerStatus = "playing" | "eliminated" | "won";
 
 type RoomStatus = "waiting" | "playing" | "finished";
 
+type Difficulty = "easy" | "medium" | "hard";
+
+const difficulties: Difficulty[] = ["easy", "medium", "hard"];
+
 type SafeCell = {
   revealed: boolean;
   flagged: boolean;
@@ -217,6 +221,7 @@ export default function GameRoom() {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [hostID, setHostID] = useState<string | null>(null);
   const [roomStatus, setRoomStatus] = useState<RoomStatus>("waiting");
+  const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [safeStartCell, setSafeStartCell] = useState<{
     row: number;
     col: number;
@@ -269,6 +274,10 @@ export default function GameRoom() {
       },
     );
 
+    socket.on("change-difficulty", (payload: { difficulty: Difficulty }) => {
+      setDifficulty(payload.difficulty);
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -297,6 +306,10 @@ export default function GameRoom() {
 
   const hostStartGameClick = () => {
     socketRef.current?.emit("start-game", { roomID });
+  };
+
+  const pickDifficulty = (d: Difficulty) => {
+    socketRef.current?.emit("set-difficulty", { difficulty: d });
   };
 
   return (
@@ -397,6 +410,40 @@ export default function GameRoom() {
                 Start game
               </button>
             )}
+
+            {/* Difficulty control for host */}
+            {isHost &&
+              (roomStatus === "waiting" || roomStatus === "finished") && (
+                <div className="flex gap-2">
+                  {difficulties.map((d) => {
+                    const isSelected = difficulty === d;
+                    return (
+                      <button
+                        key={d}
+                        onClick={() => pickDifficulty(d)}
+                        className={
+                          isSelected
+                            ? "rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm"
+                            : "rounded-lg bg-ink/5 px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink/10"
+                        }
+                      >
+                        {d.charAt(0).toUpperCase() + d.slice(1)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+            {/* Displays Difficulty for non-hosts */}
+            {!isHost && (
+              <p className="text-sm text-muted">
+                Difficulty:{" "}
+                <span className="font-medium text-ink">
+                  {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
+                </span>
+              </p>
+            )}
+
             {isHost && roomStatus === "finished" && (
               <button
                 onClick={hostStartGameClick}

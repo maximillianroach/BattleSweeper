@@ -1,7 +1,9 @@
 import { Server } from "socket.io";
 import { createBoard, reveal, type Board, progress, flag } from "./board.ts";
-import { type Player, type Room } from "./rooms.ts";
 import {
+  type Player,
+  type Room,
+  type Difficulty,
   generateRoomID,
   getRoom,
   createRoom,
@@ -93,6 +95,12 @@ function generateAvoidSet(
   return { avoidSet, startRow, startCol };
 }
 
+const DIFFICULTIES = {
+  easy: { rows: 9, cols: 9, mines: 10 },
+  medium: { rows: 16, cols: 16, mines: 40 },
+  hard: { rows: 21, cols: 21, mines: 70 },
+};
+
 const io = new Server(4000, {
   cors: {
     origin: "http://localhost:3000",
@@ -158,7 +166,11 @@ io.on("connection", (socket) => {
           players: toSafePlayers(room.players),
           roomStatus: room.status,
         });
-        socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
+        socket.emit("board", {
+          rows: DIFFICULTIES[room.difficulty].rows,
+          cols: DIFFICULTIES[room.difficulty].cols,
+          board: toSafeBoard(board),
+        });
       }
     }
   });
@@ -179,6 +191,15 @@ io.on("connection", (socket) => {
       flag(board, payload.row, payload.col);
       socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
     }
+  });
+
+  socket.on("set-difficulty", (payload: { difficulty: Difficulty }) => {
+    const room = findRoomByPlayer(socket.id);
+
+    if (!room) return;
+
+    room.difficulty = payload.difficulty;
+    io.to(room.id).emit("change-difficulty", { difficulty: room.difficulty });
   });
 
   socket.on("create-room", () => {
@@ -222,11 +243,14 @@ io.on("connection", (socket) => {
 
     resetGame(room);
 
-    const { avoidSet, startRow, startCol } = generateAvoidSet(9, 9);
+    const { rows, cols, mines } = DIFFICULTIES[room.difficulty];
+
+    const { avoidSet, startRow, startCol } = generateAvoidSet(rows, cols);
+
     room.safeStartCell = { row: startRow, col: startCol };
 
     // Create the shared board
-    const sharedBoard = createBoard(9, 9, 10, avoidSet);
+    const sharedBoard = createBoard(rows, cols, mines, avoidSet);
 
     // Assign a copy of the shared board to each player
     for (const player of room.players) {
@@ -238,8 +262,8 @@ io.on("connection", (socket) => {
     for (const player of room.players) {
       if (!player.board) continue;
       io.to(player.id).emit("board", {
-        rows: 9,
-        cols: 9,
+        rows: rows,
+        cols: cols,
         board: toSafeBoard(player.board),
       });
     }
@@ -256,6 +280,13 @@ io.on("connection", (socket) => {
     io.to(payload.roomID).emit("progress-update", {
       players: toSafePlayers(room.players),
       roomStatus: room.status,
+    });
+  });
+
+  socket.on("try-to-join", (payload: { code: string }) => {
+    socket.emit("try-to-join-message", {
+      message: getRoom(payload.code.toUpperCase()) !== undefined,
+      code: payload.code,
     });
   });
 
