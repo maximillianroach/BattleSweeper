@@ -43,10 +43,14 @@ function Board({
   board,
   onCellClick,
   canPlay,
+  safeStartCell,
+  hasStarted,
 }: {
   board: SafeCell[][];
   onCellClick: (r: number, c: number) => void;
   canPlay: boolean;
+  safeStartCell: { row: number; col: number };
+  hasStarted: boolean;
 }) {
   // Determines the symbol of a cell based on its properties
   const determineSymbol = (cell: SafeCell): string => {
@@ -75,12 +79,25 @@ function Board({
           <button
             key={`${r}-${c}`}
             onClick={() => canPlay && onCellClick(r, c)}
-            disabled={!canPlay}
+            // The cell is disabled if play is off OR its on and the cell is the safe cell
+            disabled={
+              !canPlay ||
+              (canPlay &&
+                !hasStarted &&
+                (r !== safeStartCell.row || c !== safeStartCell.col))
+            }
             style={{
               width: 30,
               height: 30,
               border: "1px solid #999",
-              background: cell.revealed ? "#ddd" : "#bbb",
+              background:
+                !hasStarted &&
+                r === safeStartCell.row &&
+                c === safeStartCell.col
+                  ? "#7c4"
+                  : cell.revealed
+                    ? "#ddd"
+                    : "#bbb",
               fontSize: 14,
               cursor: canPlay ? "pointer" : "default",
               color: "black",
@@ -99,7 +116,12 @@ export default function GameRoom() {
   const [board, setBoard] = useState<SafeCell[][] | null>(null);
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [hostID, setHostID] = useState<string | null>(null);
-  const [roomStatus, setRoomStatus] = useState<string>("waiting");
+  const [roomStatus, setRoomStatus] = useState<RoomStatus>("waiting");
+  const [safeStartCell, setSafeStartCell] = useState<{
+    row: number;
+    col: number;
+  }>({ row: 0, col: 0 });
+  const [hasStarted, setHasStarted] = useState<boolean>(false);
   const params = useParams();
   const roomID = params.roomID as string;
 
@@ -135,9 +157,17 @@ export default function GameRoom() {
       },
     );
 
-    socket.on("game-starting", (payload: { roomStatus: RoomStatus }) => {
-      setRoomStatus(payload.roomStatus);
-    });
+    socket.on(
+      "game-starting",
+      (payload: {
+        roomStatus: RoomStatus;
+        safeStartCell: { row: number; col: number };
+      }) => {
+        setRoomStatus(payload.roomStatus);
+        setSafeStartCell(payload.safeStartCell);
+        setHasStarted(false);
+      },
+    );
 
     return () => {
       socket.disconnect();
@@ -155,6 +185,7 @@ export default function GameRoom() {
   // When a cell is clicked that signal is sent to the server to perform the proper reveal
   const cellClick = (row: number, col: number) => {
     socketRef.current?.emit("reveal", { row: row, col: col });
+    setHasStarted(true);
   };
 
   const hostStartGameClick = () => {
@@ -178,7 +209,13 @@ export default function GameRoom() {
         {myStatus === "eliminated" && <h2>You hit a mine - eliminated</h2>}
 
         {board ? (
-          <Board board={board} onCellClick={cellClick} canPlay={canPlay} />
+          <Board
+            board={board}
+            onCellClick={cellClick}
+            canPlay={canPlay}
+            safeStartCell={safeStartCell}
+            hasStarted={hasStarted}
+          />
         ) : (
           <p>Waiting for game to start...</p>
         )}

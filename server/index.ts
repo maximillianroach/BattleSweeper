@@ -55,6 +55,7 @@ function resetGame(room: Room) {
     player.status = "playing";
     player.progress = 0;
     player.board = null;
+    player.hasStarted = false;
   }
 }
 // Checks if all players in the room are eliminated
@@ -65,6 +66,31 @@ function checkAllEliminated(room: Room) {
     }
   }
   return true;
+}
+// Creates the set of cells to avoid for createBoard
+function generateAvoidSet(
+  rows: number,
+  cols: number,
+): { avoidSet: Set<number>; startRow: number; startCol: number } {
+  const startRow = Math.round(rows / 2);
+  const startCol = Math.round(cols / 2);
+
+  const avoidSet = new Set<number>();
+
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (
+        startRow + dr < 0 ||
+        startCol + dc < 0 ||
+        startRow + dr >= rows ||
+        startCol + dc >= cols
+      ) {
+        continue;
+      }
+      avoidSet.add((startRow + dr) * cols + (startCol + dc));
+    }
+  }
+  return { avoidSet, startRow, startCol };
 }
 
 const io = new Server(4000, {
@@ -88,6 +114,19 @@ io.on("connection", (socket) => {
     if (board && room) {
       // Cheks that both the player and room have "playing" status for revealing to be allowed.
       if (player.status === "playing" && room.status === "playing") {
+        // If the player hasn't clicked the initial safe square, disable all others
+        if (!player.hasStarted) {
+          // The safe cell has been clicked
+          if (
+            payload.row === room.safeStartCell?.row &&
+            payload.col === room.safeStartCell?.col
+          ) {
+            player.hasStarted = true;
+          } else {
+            return;
+          }
+        }
+
         reveal(board, payload.row, payload.col);
         player.progress = progress(board);
 
@@ -135,6 +174,7 @@ io.on("connection", (socket) => {
       board: null,
       progress: 0,
       status: "playing",
+      hasStarted: false,
     });
     socket.join(payload.roomID);
     io.to(payload.roomID).emit("room-update", {
@@ -149,8 +189,11 @@ io.on("connection", (socket) => {
 
     resetGame(room);
 
+    const { avoidSet, startRow, startCol } = generateAvoidSet(9, 9);
+    room.safeStartCell = { row: startRow, col: startCol };
+
     // Create the shared board
-    const sharedBoard = createBoard(9, 9, 10);
+    const sharedBoard = createBoard(9, 9, 10, avoidSet);
 
     // Assign a copy of the shared board to each player
     for (const player of room.players) {
@@ -171,7 +214,10 @@ io.on("connection", (socket) => {
     // Enable "playing" status for the room
     room.status = "playing";
 
-    io.to(payload.roomID).emit("game-starting", { roomStatus: room.status });
+    io.to(payload.roomID).emit("game-starting", {
+      roomStatus: room.status,
+      safeStartCell: room.safeStartCell,
+    });
 
     // We need a progress-update so we can send the new player statuses after resetting
     io.to(payload.roomID).emit("progress-update", {

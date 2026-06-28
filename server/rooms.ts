@@ -9,6 +9,7 @@ export type Player = {
   board: Board | null;
   progress: number;
   status: PlayerStatus;
+  hasStarted: boolean;
 };
 
 export type Room = {
@@ -16,6 +17,7 @@ export type Room = {
   players: Player[];
   hostID: string | null;
   status: RoomStatus;
+  safeStartCell: { row: number; col: number } | null;
 };
 
 const rooms = new Map<string, Room>();
@@ -55,6 +57,7 @@ export const createRoom = (): Room => {
     players: [],
     hostID: null,
     status: "waiting",
+    safeStartCell: null,
   };
   rooms.set(newRoom.id, newRoom);
   return newRoom;
