@@ -112,7 +112,17 @@ io.on("connection", (socket) => {
     const board = player?.board;
 
     if (board && room) {
-      // Cheks that both the player and room have "playing" status for revealing to be allowed.
+      // Bars invalid row and col parameters
+      if (
+        payload.row >= board.length ||
+        payload.col >= board[0].length ||
+        payload.row < 0 ||
+        payload.col < 0
+      ) {
+        return;
+      }
+
+      // Checks that both the player and room have "playing" status for revealing to be allowed.
       if (player.status === "playing" && room.status === "playing") {
         // If the player hasn't clicked the initial safe square, disable all others
         if (!player.hasStarted) {
@@ -186,6 +196,11 @@ io.on("connection", (socket) => {
   socket.on("start-game", (payload: { roomID: string }) => {
     const room = getRoom(payload.roomID);
     if (!room) return;
+
+    // Makes it so non-host sockets can't start game
+    if (room.hostID !== socket.id) {
+      return;
+    }
 
     resetGame(room);
 
