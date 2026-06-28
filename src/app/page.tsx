@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 export default function LandingPage() {
   const socketRef = useRef<Socket | null>(null);
+  const nameRef = useRef<string>("");
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -22,14 +23,18 @@ export default function LandingPage() {
     });
 
     socket.on("room-created", (payload: { roomID: string }) => {
-      router.push(`/play/${payload.roomID}`);
+      router.push(
+        `/play/${payload.roomID}?name=${encodeURIComponent(nameRef.current)}`,
+      );
     });
 
     socket.on(
       "try-to-join-message",
       (payload: { message: boolean; code: string }) => {
         if (payload.message) {
-          router.push(`/play/${payload.code.toUpperCase()}`);
+          router.push(
+            `/play/${payload.code.toUpperCase()}?name=${encodeURIComponent(nameRef.current)}`,
+          );
         } else {
           setJoining(false);
           setError(
@@ -78,7 +83,7 @@ export default function LandingPage() {
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <span className="text-4xl">💣</span>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Minesweeper Battle
+            BattleSweeper
           </h1>
           {mode === "choose" && (
             <p className="max-w-xs text-sm leading-relaxed text-muted">
@@ -115,7 +120,10 @@ export default function LandingPage() {
                 </label>
                 <input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    nameRef.current = e.target.value;
+                  }}
                   placeholder="e.g. Max"
                   className="rounded-lg border border-ink/15 bg-paper px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
@@ -146,7 +154,10 @@ export default function LandingPage() {
                 </label>
                 <input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    nameRef.current = e.target.value;
+                  }}
                   placeholder="e.g. Max"
                   className="rounded-lg border border-ink/15 bg-paper px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
@@ -161,7 +172,7 @@ export default function LandingPage() {
                     setCode(e.target.value.toUpperCase());
                     if (error) setError("");
                   }}
-                  placeholder="e.g. AB12CD"
+                  placeholder="e.g. ABCD12"
                   maxLength={6}
                   aria-invalid={error ? true : false}
                   className={`rounded-lg border bg-paper px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-ink outline-none transition placeholder:font-sans placeholder:tracking-normal placeholder:text-muted/60 focus:ring-2 ${

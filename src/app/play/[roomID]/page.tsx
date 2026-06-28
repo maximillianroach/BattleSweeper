@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 type PlayerStatus = "playing" | "eliminated" | "won";
 
@@ -11,6 +11,18 @@ type Difficulty = "easy" | "medium" | "hard";
 
 const difficulties: Difficulty[] = ["easy", "medium", "hard"];
 
+const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
+
+const DIFFICULTY_DESC: Record<Difficulty, string> = {
+  easy: "9×9 · 10 mines",
+  medium: "16×16 · 40 mines",
+  hard: "21×21 · 70 mines",
+};
+
 type SafeCell = {
   revealed: boolean;
   flagged: boolean;
@@ -18,13 +30,23 @@ type SafeCell = {
   isMine: boolean | null;
 };
 
-// Created as a safe version of Player - no board
-// We don't want to mix the server-side Player with client-side
 type PlayerInfo = {
   id: string;
   progress: number;
   status: PlayerStatus;
+  name: string;
 };
+
+type ChatMessage = {
+  id: string; // sender socket id
+  name: string; // sender display name
+  text: string;
+  at: number; // timestamp (ms)
+};
+
+function displayName(player: PlayerInfo): string {
+  return player.name || "Anonymous";
+}
 
 // Classic Minesweeper number colors
 function numberColor(n: number): string {
@@ -50,12 +72,6 @@ function numberColor(n: number): string {
   }
 }
 
-// A short, stable, readable label for a socket id
-function shortName(index: number): string {
-  return `Player ${index + 1}`;
-}
-
-// Displays the progress of each player as labelled bars
 function ProgressBars({
   players,
   myId,
@@ -65,7 +81,7 @@ function ProgressBars({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      {players.map((p, i) => {
+      {players.map((p) => {
         const isMe = p.id === myId;
         const statusLabel =
           p.status === "won"
@@ -89,7 +105,7 @@ function ProgressBars({
                   isMe ? "font-semibold text-ink" : "font-medium text-ink/80"
                 }
               >
-                {shortName(i)}
+                {displayName(p)}
                 {isMe && (
                   <span className="ml-1.5 text-xs font-normal text-muted">
                     you
@@ -138,7 +154,6 @@ function Board({
   safeStartCell: { row: number; col: number };
   hasStarted: boolean;
 }) {
-  // Determines the symbol of a cell based on its properties
   const determineSymbol = (cell: SafeCell): string => {
     if (!cell.revealed) {
       return cell.flagged ? "🚩" : "";
@@ -214,6 +229,126 @@ function Board({
     </div>
   );
 }
+function LobbyPlayerList({
+  players,
+  myId,
+  hostID,
+}: {
+  players: PlayerInfo[];
+  myId: string | undefined;
+  hostID: string | null;
+}) {
+  return (
+    <ul className="flex flex-col gap-2">
+      {players.map((p) => {
+        const isMe = p.id === myId;
+        const isHost = p.id === hostID;
+        return (
+          <li
+            key={p.id}
+            className="flex items-center justify-between rounded-lg bg-ink/[0.03] px-3 py-2.5"
+          >
+            <span className="flex items-center gap-2 text-sm">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent">
+                {displayName(p).charAt(0).toUpperCase()}
+              </span>
+              <span className="font-medium text-ink">{displayName(p)}</span>
+              {isMe && <span className="text-xs text-muted">you</span>}
+            </span>
+            {isHost && (
+              <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                Host
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function Chat({
+  messages,
+  draft,
+  setDraft,
+  onSend,
+  myId,
+}: {
+  messages: ChatMessage[];
+  draft: string;
+  setDraft: (v: string) => void;
+  onSend: () => void;
+  myId: string | undefined;
+}) {
+  // Auto-scroll to the newest message
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  return (
+    <div className="flex h-full flex-col rounded-xl border border-ink/10 bg-surface shadow-sm">
+      {/* Header */}
+      <div className="border-b border-ink/10 px-4 py-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          Chat
+        </h3>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {messages.length === 0 ? (
+          <p className="text-sm text-muted">No messages yet. Say hi 👋</p>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {messages.map((m, i) => {
+              const isMe = m.id === myId;
+              return (
+                <div
+                  key={`${m.at}-${i}`}
+                  className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                >
+                  <span className="px-1 text-xs text-muted">
+                    {isMe ? "You" : m.name}
+                  </span>
+                  <span
+                    className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-sm ${
+                      isMe ? "bg-accent text-white" : "bg-ink/5 text-ink"
+                    }`}
+                  >
+                    {m.text}
+                  </span>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Composer */}
+      <div className="flex items-center gap-2 border-t border-ink/10 p-3">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSend();
+          }}
+          placeholder="Type a message…"
+          maxLength={300}
+          className="flex-1 rounded-lg border border-ink/15 bg-paper px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/20"
+        />
+        <button
+          onClick={onSend}
+          disabled={!draft.trim()}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 active:scale-[0.98] disabled:opacity-50"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function GameRoom() {
   const socketRef = useRef<Socket | null>(null);
@@ -227,8 +362,15 @@ export default function GameRoom() {
     col: number;
   }>({ row: 0, col: 0 });
   const [hasStarted, setHasStarted] = useState<boolean>(false);
+  const [copied, setCopied] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState("");
+
   const params = useParams();
   const roomID = params.roomID as string;
+
+  const searchParams = useSearchParams();
+  const name = searchParams.get("name") ?? "Anonymous";
 
   useEffect(() => {
     const socket = io("http://localhost:4000");
@@ -236,7 +378,7 @@ export default function GameRoom() {
 
     socket.on("connect", () => {
       console.log("Connected, joining room:", roomID);
-      socket.emit("join-room", { roomID });
+      socket.emit("join-room", { roomID, name });
     });
 
     socket.on(
@@ -278,21 +420,27 @@ export default function GameRoom() {
       setDifficulty(payload.difficulty);
     });
 
+    socket.on("returned-to-lobby", (payload: { roomStatus: RoomStatus }) => {
+      setRoomStatus(payload.roomStatus);
+      setBoard(null);
+    });
+
+    socket.on("chat-message", (msg: ChatMessage) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
     return () => {
       socket.disconnect();
     };
   }, [roomID]);
 
-  // Checks if the current socket is the host
   const isHost = hostID !== null && hostID === socketRef.current?.id;
 
-  // Derive the player's status
   const myId = socketRef.current?.id;
   const me = players.find((p) => p.id === myId);
   const myStatus = me?.status;
   const canPlay = myStatus === "playing" && roomStatus === "playing";
 
-  // When a cell is clicked that signal is sent to the server to perform the proper reveal
   const cellClick = (row: number, col: number) => {
     socketRef.current?.emit("reveal", { row: row, col: col });
     setHasStarted(true);
@@ -312,66 +460,206 @@ export default function GameRoom() {
     socketRef.current?.emit("set-difficulty", { difficulty: d });
   };
 
+  const returnToLobbyClick = () => {
+    socketRef.current?.emit("return-to-lobby", { roomID });
+  };
+
+  const sendMessage = () => {
+    const text = draft.trim();
+    if (!text) return;
+    socketRef.current?.emit("chat-message", { text });
+    setDraft("");
+  };
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(roomID);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard may be unavailable; ignore
+    }
+  };
+
+  const isLobby = roomStatus === "waiting";
+
+  // Winner (for the finished banner)
+  const winner = players.find((p) => p.status === "won");
+
   return (
     <main className="min-h-screen bg-paper text-ink">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-ink/10 px-6 py-4">
-        <h1 className="text-lg font-semibold tracking-tight">
-          Minesweeper Battle
-        </h1>
-        <p className="text-sm text-muted">
-          Room{" "}
-          <span className="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-ink/80">
+        <h1 className="text-lg font-semibold tracking-tight">BattleSweeper</h1>
+        <button
+          onClick={copyCode}
+          className="group flex items-center gap-2 rounded-lg border border-ink/10 px-3 py-1.5 text-sm transition hover:border-accent/40 hover:bg-accent/5"
+          title="Click to copy"
+        >
+          <span className="text-muted">Room</span>
+          <span className="font-mono font-semibold tracking-wider text-ink">
             {roomID}
           </span>
-        </p>
+          <span className="text-xs text-muted group-hover:text-accent">
+            {copied ? "Copied!" : "Copy"}
+          </span>
+        </button>
       </header>
 
-      {/* Side rail (players) + centered board */}
-      <div className="lg:flex">
-        {/* Players side rail */}
-        <aside className="border-b border-ink/10 px-6 py-5 lg:w-72 lg:shrink-0 lg:border-b-0 lg:border-r">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-              Players
-            </h2>
-            <span className="rounded-full bg-ink/5 px-2 py-0.5 text-xs font-medium text-muted">
-              {players.length}
-            </span>
+      {isLobby ? (
+        <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10">
+          <div className="text-center">
+            <h2 className="text-2xl font-semibold tracking-tight">Lobby</h2>
+            <p className="mt-1 text-sm text-muted">
+              Share the room code with a friend, then start when everyone&apos;s
+              in.
+            </p>
           </div>
-          {players.length > 0 ? (
-            <ProgressBars players={players} myId={myId} />
-          ) : (
-            <p className="text-sm text-muted">No one here yet.</p>
-          )}
-        </aside>
 
-        {/* Centered board column */}
-        <section className="flex flex-1 flex-col items-center gap-6 px-6 py-8">
-          {/* Status / result banner */}
-          <div className="flex min-h-[2.75rem] items-center">
-            {myStatus === "won" && (
-              <div className="inline-flex items-center gap-2 rounded-lg bg-accent/10 px-4 py-2 text-accent">
-                <span className="text-lg">🏆</span>
-                <span className="font-semibold">You won!</span>
-              </div>
-            )}
-            {myStatus === "eliminated" && (
-              <div className="inline-flex items-center gap-2 rounded-lg bg-rose-50 px-4 py-2 text-rose-700">
-                <span className="text-lg">💥</span>
-                <span className="font-semibold">
-                  You hit a mine — eliminated
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Players */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
+                  Players
+                </h3>
+                <span className="rounded-full bg-ink/5 px-2 py-0.5 text-xs font-medium text-muted">
+                  {players.length}
                 </span>
               </div>
-            )}
-            {roomStatus === "waiting" && myStatus !== "won" && (
+              {players.length > 0 ? (
+                <LobbyPlayerList
+                  players={players}
+                  myId={myId}
+                  hostID={hostID}
+                />
+              ) : (
+                <p className="text-sm text-muted">Waiting for players…</p>
+              )}
+            </div>
+
+            {/* Settings / chat placeholder column */}
+            <div className="flex flex-col gap-6">
+              {/* Difficulty */}
+              <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted">
+                  Difficulty
+                </h3>
+                {isHost ? (
+                  <div className="flex flex-col gap-2">
+                    {difficulties.map((d) => {
+                      const isSelected = difficulty === d;
+                      return (
+                        <button
+                          key={d}
+                          onClick={() => pickDifficulty(d)}
+                          className={`flex items-center justify-between rounded-lg px-4 py-2.5 text-sm transition ${
+                            isSelected
+                              ? "bg-accent text-white shadow-sm"
+                              : "bg-ink/5 text-ink hover:bg-ink/10"
+                          }`}
+                        >
+                          <span className="font-semibold">
+                            {DIFFICULTY_LABELS[d]}
+                          </span>
+                          <span
+                            className={
+                              isSelected
+                                ? "text-xs text-white/80"
+                                : "text-xs text-muted"
+                            }
+                          >
+                            {DIFFICULTY_DESC[d]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-ink/5 px-4 py-2.5 text-sm">
+                    <span className="font-semibold text-ink">
+                      {DIFFICULTY_LABELS[difficulty]}
+                    </span>
+                    <span className="ml-2 text-xs text-muted">
+                      {DIFFICULTY_DESC[difficulty]}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat placeholder — Checkpoint 12 goes here */}
+              <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-ink/15 p-5 text-center text-sm text-muted h-[400px]">
+                <Chat
+                  messages={messages}
+                  draft={draft}
+                  setDraft={setDraft}
+                  onSend={sendMessage}
+                  myId={socketRef.current?.id}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Start control */}
+          <div className="flex flex-col items-center gap-2">
+            {isHost ? (
+              <button
+                onClick={hostStartGameClick}
+                className="rounded-lg bg-accent px-8 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 active:scale-[0.98]"
+              >
+                Start game
+              </button>
+            ) : (
               <p className="text-sm text-muted">
-                Waiting for the host to start the game…
+                Waiting for the host to start…
               </p>
             )}
-            {roomStatus === "playing" &&
-              myStatus === "playing" &&
-              !hasStarted && (
+          </div>
+        </div>
+      ) : (
+        <div className="lg:flex">
+          {/* Players side rail */}
+          <aside className="border-b border-ink/10 px-6 py-5 lg:w-72 lg:shrink-0 lg:border-b-0 lg:border-r">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+                Players
+              </h2>
+              <span className="rounded-full bg-ink/5 px-2 py-0.5 text-xs font-medium text-muted">
+                {players.length}
+              </span>
+            </div>
+            {players.length > 0 ? (
+              <ProgressBars players={players} myId={myId} />
+            ) : (
+              <p className="text-sm text-muted">No one here yet.</p>
+            )}
+          </aside>
+
+          {/* Centered board column */}
+          <section className="flex flex-1 flex-col items-center gap-6 px-6 py-8">
+            {/* Status / result banner */}
+            <div className="flex min-h-[2.75rem] items-center">
+              {roomStatus === "finished" && winner ? (
+                <div className="inline-flex items-center gap-2 rounded-lg bg-accent/10 px-4 py-2 text-accent">
+                  <span className="text-lg">🏆</span>
+                  <span className="font-semibold">
+                    {winner.id === myId
+                      ? "You won!"
+                      : `${displayName(winner)} won!`}
+                  </span>
+                </div>
+              ) : roomStatus === "finished" ? (
+                <div className="inline-flex items-center gap-2 rounded-lg bg-ink/5 px-4 py-2 text-muted">
+                  <span className="font-semibold">Game over</span>
+                </div>
+              ) : myStatus === "eliminated" ? (
+                <div className="inline-flex items-center gap-2 rounded-lg bg-rose-50 px-4 py-2 text-rose-700">
+                  <span className="text-lg">💥</span>
+                  <span className="font-semibold">
+                    You hit a mine — eliminated
+                  </span>
+                </div>
+              ) : myStatus === "playing" && !hasStarted ? (
                 <p className="text-sm text-muted">
                   Click the{" "}
                   <span className="font-medium text-accent">
@@ -379,82 +667,53 @@ export default function GameRoom() {
                   </span>{" "}
                   to begin.
                 </p>
-              )}
-          </div>
+              ) : null}
+            </div>
 
-          {/* Board — capped square that scales with the viewport */}
-          <div className="w-full max-w-[min(80vh,640px)]">
-            {board ? (
-              <Board
-                board={board}
-                onCellClick={cellClick}
-                onCellRightClick={cellRightClick}
-                canPlay={canPlay}
-                safeStartCell={safeStartCell}
-                hasStarted={hasStarted}
-              />
-            ) : (
-              <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-ink/15 text-sm text-muted">
-                Waiting for game to start…
-              </div>
-            )}
-          </div>
-
-          {/* Host controls */}
-          <div className="min-h-[3rem]">
-            {isHost && roomStatus === "waiting" && (
-              <button
-                onClick={hostStartGameClick}
-                className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 active:scale-[0.98]"
-              >
-                Start game
-              </button>
-            )}
-
-            {/* Difficulty control for host */}
-            {isHost &&
-              (roomStatus === "waiting" || roomStatus === "finished") && (
-                <div className="flex gap-2">
-                  {difficulties.map((d) => {
-                    const isSelected = difficulty === d;
-                    return (
-                      <button
-                        key={d}
-                        onClick={() => pickDifficulty(d)}
-                        className={
-                          isSelected
-                            ? "rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm"
-                            : "rounded-lg bg-ink/5 px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink/10"
-                        }
-                      >
-                        {d.charAt(0).toUpperCase() + d.slice(1)}
-                      </button>
-                    );
-                  })}
+            {/* Board */}
+            <div className="w-full max-w-[min(80vh,640px)]">
+              {board ? (
+                <Board
+                  board={board}
+                  onCellClick={cellClick}
+                  onCellRightClick={cellRightClick}
+                  canPlay={canPlay}
+                  safeStartCell={safeStartCell}
+                  hasStarted={hasStarted}
+                />
+              ) : (
+                <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-ink/15 text-sm text-muted">
+                  Loading…
                 </div>
               )}
+            </div>
 
-            {/* Displays Difficulty for non-hosts */}
-            {!isHost && (
-              <p className="text-sm text-muted">
-                Difficulty:{" "}
-                <span className="font-medium text-ink">
-                  {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
-                </span>
-              </p>
-            )}
+            {/* Post-game host controls */}
+            <div className="flex min-h-[3rem] items-center gap-3">
+              {isHost && roomStatus === "finished" && (
+                <>
+                  <button
+                    onClick={hostStartGameClick}
+                    className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 active:scale-[0.98]"
+                  >
+                    Play again
+                  </button>
 
-            {isHost && roomStatus === "finished" && (
-              <button
-                onClick={hostStartGameClick}
-                className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 active:scale-[0.98]"
-              >
-                Start new game
-              </button>
-            )}
-          </div>
-        </section>
-      </div>
+                  <button
+                    onClick={returnToLobbyClick}
+                    className="rounded-lg border border-ink/15 px-6 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink/5 active:scale-[0.98]"
+                  >
+                    Back to lobby
+                  </button>
+                </>
+              )}
+              {!isHost && roomStatus === "finished" && (
+                <p className="text-sm text-muted">Waiting for the host…</p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

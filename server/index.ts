@@ -45,6 +45,7 @@ function toSafePlayers(players: Player[]) {
     id: p.id,
     progress: p.board ? p.progress : 0,
     status: p.status,
+    name: p.name,
   }));
 }
 
@@ -175,6 +176,26 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("chat-message", (payload: { text: string }) => {
+    const room = findRoomByPlayer(socket.id);
+    if (!room) return;
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+
+    // Basic validation: ignore empty or absurdly long messages
+    const text = payload.text.trim();
+    if (text.length === 0 || text.length > 300) return;
+
+    // Broadcast to everyone in the room (including sender)
+    io.to(room.id).emit("chat-message", {
+      id: socket.id,
+      name: player.name || "Anonymous",
+      text: text,
+      at: Date.now(),
+    });
+  });
+
   socket.on("flag", (payload: { row: number; col: number }) => {
     const room = findRoomByPlayer(socket.id);
     const player = room?.players.find((p) => p.id === socket.id);
@@ -207,7 +228,7 @@ io.on("connection", (socket) => {
     socket.emit("room-created", { roomID: room.id });
   });
 
-  socket.on("join-room", (payload: { roomID: string }) => {
+  socket.on("join-room", (payload: { roomID: string; name: string }) => {
     const room = getRoom(payload.roomID);
 
     if (!room) {
@@ -224,11 +245,22 @@ io.on("connection", (socket) => {
       progress: 0,
       status: "playing",
       hasStarted: false,
+      name: payload.name,
     });
     socket.join(payload.roomID);
     io.to(payload.roomID).emit("room-update", {
       players: toSafePlayers(room.players),
       hostID: room.hostID,
+    });
+  });
+
+  socket.on("return-to-lobby", (payload: { roomID: string }) => {
+    const room = getRoom(payload.roomID);
+    if (!room) return;
+    room.status = "waiting";
+
+    io.to(payload.roomID).emit("returned-to-lobby", {
+      roomStatus: room.status,
     });
   });
 
