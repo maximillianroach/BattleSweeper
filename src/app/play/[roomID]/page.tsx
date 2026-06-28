@@ -122,12 +122,14 @@ function ProgressBars({
 function Board({
   board,
   onCellClick,
+  onCellRightClick,
   canPlay,
   safeStartCell,
   hasStarted,
 }: {
   board: SafeCell[][];
   onCellClick: (r: number, c: number) => void;
+  onCellRightClick: (e: React.MouseEvent, r: number, c: number) => void;
   canPlay: boolean;
   safeStartCell: { row: number; col: number };
   hasStarted: boolean;
@@ -192,6 +194,7 @@ function Board({
             <button
               key={`${r}-${c}`}
               onClick={() => canPlay && onCellClick(r, c)}
+              onContextMenu={(e) => onCellRightClick(e, r, c)}
               disabled={disabled}
               className={`${base} ${stateClasses} ${numClass} ${
                 disabled && !isSafeHighlight
@@ -286,6 +289,12 @@ export default function GameRoom() {
     setHasStarted(true);
   };
 
+  const cellRightClick = (e: React.MouseEvent, row: number, col: number) => {
+    e.preventDefault();
+    if (!canPlay) return;
+    socketRef.current?.emit("flag", { row: row, col: col });
+  };
+
   const hostStartGameClick = () => {
     socketRef.current?.emit("start-game", { roomID });
   };
@@ -366,6 +375,7 @@ export default function GameRoom() {
               <Board
                 board={board}
                 onCellClick={cellClick}
+                onCellRightClick={cellRightClick}
                 canPlay={canPlay}
                 safeStartCell={safeStartCell}
                 hasStarted={hasStarted}

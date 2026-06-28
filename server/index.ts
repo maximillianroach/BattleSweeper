@@ -1,5 +1,5 @@
 import { Server } from "socket.io";
-import { createBoard, reveal, type Board, progress } from "./board.ts";
+import { createBoard, reveal, type Board, progress, flag } from "./board.ts";
 import { type Player, type Room } from "./rooms.ts";
 import {
   generateRoomID,
@@ -160,6 +160,24 @@ io.on("connection", (socket) => {
         });
         socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
       }
+    }
+  });
+
+  socket.on("flag", (payload: { row: number; col: number }) => {
+    const room = findRoomByPlayer(socket.id);
+    const player = room?.players.find((p) => p.id === socket.id);
+    const board = player?.board;
+
+    // Prevents flagging before first click
+    if (!player?.hasStarted) return;
+
+    if (player?.status !== "playing" || room?.status !== "playing") {
+      return;
+    }
+
+    if (board && room) {
+      flag(board, payload.row, payload.col);
+      socket.emit("board", { rows: 9, cols: 9, board: toSafeBoard(board) });
     }
   });
 
